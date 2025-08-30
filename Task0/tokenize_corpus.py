@@ -91,20 +91,27 @@ def _pick_text(doc: dict) -> str:
 
 def _tokenize_spacy(nlp, text: str, stopwords: Set[str]):
     """
-    spaCy tokenization -> ASCII-only -> lowercase -> digit-drop -> stopword filter.
-    Keep punctuation/symbols if they survive filters.
+    Assignment tokenizer:
+    1. Keep only ASCII by removing any non-ASCII bytes
+    2. Lowercase
+    3. Remove digits 0–9 completely from text (keep punctuation/symbols)
+    4. Tokenize with spaCy
+    5. Filter stopwords
     """
-    # ASCII-only to mirror A1 behavior
+    # Step 1: ASCII-only filtering
     text = text.encode("ascii", "ignore").decode("ascii")
-    # spaCy tokenize (English rule-based)
+    
+    # Step 2 & 3: Lowercase and remove digits completely
+    text = text.lower().translate(_DIGIT_DELETE)
+    
+    # Step 4: spaCy tokenize the cleaned text
     doc = nlp(text)
+    
+    # Step 5: Filter tokens and stopwords
     for tok in doc:
         if tok.is_space:
             continue
-        t = tok.text.lower()
-        # Drop any token containing a digit
-        if any(ch.isdigit() for ch in t):
-            continue
+        t = tok.text
         # Apply stopword filter
         if t in stopwords:
             continue
@@ -153,6 +160,7 @@ def build_vocab(corpus_path: str, stopwords_file: str, vocab_dir: str, mode: str
     try:
         nlp = spacy.blank("en")          # rule-based English tokenizer; no internet needed
     except Exception:
+        print("Had to switch to ultra-fallback tokenizer")
         nlp = spacy.blank("xx")          # ultra-fallback, but "en" is expected
     nlp.max_length = 300_000_000         # allow very large inputs safely for tokenization
 
