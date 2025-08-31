@@ -91,7 +91,7 @@ def _fast_tokenize(nlp, text: str):
 
 
 # --------------- REQUIRED FUNCTIONS ----------------
-def buildindex(corpus_dir: str, vocab_path: str) -> InvertedIndex:
+def build_index(corpus_dir: str, vocab_path: str) -> InvertedIndex:
     """
     Build a positional inverted index with explicit TF per (term, doc).
     Uses spaCy tokenizer (no extra normalization).
@@ -151,15 +151,18 @@ def buildindex(corpus_dir: str, vocab_path: str) -> InvertedIndex:
     return inv
 
 
-def saveindex(inv: InvertedIndex, index_dir: str) -> str:
+def save_index(inv: InvertedIndex, index_dir: str) -> None:
     """
     Save to index.json with deterministic ordering:
       - terms sorted by token alphabetically
       - docs sorted by external doc_id alphabetically
     {
       "term": {
-        "ext_doc_id": {"tf": <int>, "positions": [ ... ]},
-        ...
+        "df": int,
+        "postings": {
+          "ext_doc_id": {"tf": <int>, "pos": [ ... ]},
+          ...
+        }
       },
       ...
     }
@@ -179,32 +182,34 @@ def saveindex(inv: InvertedIndex, index_dir: str) -> str:
         for did in doc_ids_sorted:
             ext_id = inv.id2doc[did]
             entry = postings[did]
+            #term_obj[ext_id] = {"tf": entry["tf"], "pos": sorted(entry["positions"])}
             term_obj[ext_id] = {"tf": entry["tf"], "positions": entry["positions"]}
-        result[term] = term_obj
+            
+        result[term] = {"df": len(term_obj), "postings": term_obj}
 
     out_path = os.path.join(index_dir, "index.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result, f, separators=(",", ":"))  # compact
         # json.dump(result, f, indent=2)  # pretty
-    return out_path
 
 
-def loadindex(index_json_path: str) -> dict:
+def load_index(index_dir: str) -> dict:
     """
-    Load index.json produced by saveindex.
-    Returns dict[str -> dict[str -> {"tf": int, "positions": list[int]}]].
+    Load index.json produced by save_index.
+    Returns dict[str -> {"df": int, "postings": dict[str -> {"tf": int, "pos": list[int]}]}].
     """
-    with open(index_json_path, "r", encoding="utf-8") as f:
+    path = os.path.join(index_dir, "index.json")
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 if __name__ == "__main__":
-    # Usage: python3 buildindex.py <CORPUS_DIR> <VOCAB.txt> <INDEX_DIR>
-    if len(sys.argv) < 3:
+    # Usage: python3 build_index.py <CORPUS_DIR> <VOCAB.txt> <INDEX_DIR>
+    if len(sys.argv) < 4:
         print(f"Usage: {sys.argv[0]} <CORPUS_DIR> <VOCAB.txt> <INDEX_DIR>")
         sys.exit(1)
 
     corpus_dir, vocab_file, index_dir = sys.argv[1:4]
-    inv = buildindex(corpus_dir, vocab_file)
-    path = saveindex(inv, index_dir)
-    print(f"Wrote index to: {path}")
+    inv = build_index(corpus_dir, vocab_file)
+    save_index(inv, index_dir)
+    print(f"Wrote index to: {os.path.join(index_dir, 'index.json')}")

@@ -23,6 +23,4 @@ if __name__ == "__main__":
         for i, (docid, entry) in enumerate(postings.items()):
             if i >= 3:
                 break
-            tf = entry.get("tf")
-            positions = entry.get("positions", [])
-            print(f"   {docid}: tf={tf}, positions(sample)={positions[:10]}")
+            print(entry)

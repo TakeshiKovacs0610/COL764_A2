@@ -112,8 +112,21 @@ def _vle_decode(buf: bytes, pos: int) -> Tuple[int, int]:
 
 def _load_index_json(index_dir: str) -> Dict[str, Dict[str, List[int]]]:
     """
-    Load positional inverted index from index.json (Assignment 2 default format).
-    We normalize postings so values are *positions only* (List[int]).
+    Load positional inverted index from index.json (Assignment 2 schema):
+
+    {
+      "term": {
+        "df": <int>,
+        "postings": {
+          "DOCID_A": {"tf": <int>, "pos": [<int>, ...]},
+          "DOCID_B": {"tf": <int>, "pos": [<int>, ...]}
+        }
+      },
+      ...
+    }
+
+    Returns an internal normalized view:
+        term -> { docid -> [positions...] }
     """
     p = os.path.join(index_dir, "index.json")
     if not os.path.isfile(p):
@@ -122,23 +135,54 @@ def _load_index_json(index_dir: str) -> Dict[str, Dict[str, List[int]]]:
     with open(p, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # Normalize: token -> docid -> positions[]
     norm: Dict[str, Dict[str, List[int]]] = {}
-    for tok, posting in data.items():
-        inner = {}
-        if isinstance(posting, dict):
-            for docid, val in posting.items():
-                if isinstance(val, dict) and "positions" in val:
-                    inner[docid] = list(map(int, val["positions"]))
-                elif isinstance(val, list) and (not val or isinstance(val[0], int)):
-                    inner[docid] = list(map(int, val))
-                else:
-                    # Unknown shape; be permissive
-                    try:
-                        inner[docid] = list(map(int, val.get("pos", [])))
-                    except Exception:
-                        inner[docid] = []
-        norm[tok] = inner
+    for term, term_obj in data.items():
+        if not isinstance(term, str) or not isinstance(term_obj, dict):
+            continue
+
+        # Expect keys: "df" and "postings"
+        df_val = term_obj.get("df", None)
+        postings_obj = term_obj.get("postings", {})
+        if not isinstance(postings_obj, dict):
+            postings_obj = {}
+
+        inner: Dict[str, List[int]] = {}
+        for docid, stats in postings_obj.items():
+            # stats must have "tf" and "pos"
+            if not isinstance(stats, dict):
+                continue
+            pos_list = stats.get("pos", [])
+            tf_val = stats.get("tf", None)
+
+            # Defensive normalization
+            if not isinstance(docid, str):
+                docid = str(docid)
+            if not isinstance(pos_list, list):
+                pos_list = []
+            # ensure ints & sorted (assignment writers usually store sorted already)
+            try:
+                positions = [int(x) for x in pos_list]
+            except Exception:
+                positions = []
+
+            # Optional consistency check with tf
+            if isinstance(tf_val, int) and tf_val >= 0 and positions and tf_val != len(positions):
+                # If mismatch, trust positions but you could log a warning here.
+                pass
+
+            inner[docid] = positions
+
+        # Optional consistency check with df
+        if isinstance(df_val, int) and df_val >= 0:
+            # df should equal number of docs with at least one occurrence
+            # (Don’t hard-fail; just a sanity check.)
+            non_empty_docs = sum(1 for v in inner.values() if v)
+            if df_val != non_empty_docs:
+                # You can log a warning here if you want strict auditing.
+                pass
+
+        norm[term] = inner
+
     return norm
 
 
@@ -325,15 +369,15 @@ def to_postfix(tokens: List[object]) -> List[object]:
     for tok in tokens:
         if _is_atom(tok):
             out.append(tok)
-        elif tok in OPERATORS:
+        elif isinstance(tok, str) and tok in OPERATORS:
             while st:
                 top = st[-1]
-                if top in OPERATORS:
+                if isinstance(top, str) and top in OPERATORS:
                     if ((tok not in right_assoc and prec[tok] <= prec[top]) or
                         (tok in right_assoc and prec[tok] <  prec[top])):
                         out.append(st.pop()); continue
                 break
-            st.append(tok)  # type: ignore
+            st.append(tok)
         elif tok == "(":
             st.append(tok)  # type: ignore
         elif tok == ")":
