@@ -1,9 +1,9 @@
 #!/bin/bash
-# Usage: ./tokenize_corpus.sh <CORPUS_DIR_OR_FILE> <STOPWORDS_FILE> <VOCAB_DIR> [--time]
-# Calls tokenize_corpus.py with the given arguments.
+# Usage: ./tokenize_corpus.sh <CORPUS_DIR> <PATH_OF_STOPWORD_FILE> <VOCAB_DIR> [--time]
+# Calls tokenize_corpus.py with spaCy-only tokenization (stopwords arg accepted but ignored).
 
 if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
-    echo "Usage: $0 <CORPUS_DIR_OR_FILE> <STOPWORDS_FILE> <VOCAB_DIR> [--time]"
+    echo "Usage: $0 <CORPUS_DIR> <PATH_OF_STOPWORD_FILE> <VOCAB_DIR> [--time]"
     exit 1
 fi
 
@@ -18,4 +18,5 @@ else
     python3 "$(dirname "$0")/tokenize_corpus.py" "$CORPUS_PATH" "$STOPWORDS_FILE" "$VOCAB_DIR"
 fi
 
-# bash tokenize_corpus.sh Data/Doc Data/stopwords.txt temp --time
+# Example:
+#   bash tokenize_corpus.sh Data/Doc Data/stopwords.txt temp --time

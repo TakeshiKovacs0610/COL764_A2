@@ -70,3 +70,7 @@ bash tokenize_corpus.sh Data/Doc Data/stopwords.txt temp --time
 * No stemming or lemmatization is performed (explicitly disallowed in assignment spec).
 
 
+
+
+
+

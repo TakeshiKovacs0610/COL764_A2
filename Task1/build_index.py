@@ -46,10 +46,6 @@ class InvertedIndex:
         return did
 
 
-# ---------- Fast tokenizer setup ----------
-# Translate table to delete ASCII digits 0-9
-_DIGIT_DELETE = str.maketrans("", "", "0123456789")
-
 def _init_tokenizer():
     """
     Fast tokenizer using spaCy's blank English tokenizer.
@@ -59,42 +55,26 @@ def _init_tokenizer():
     nlp.max_length = 300_000_000  # allow very large inputs safely
     return nlp
 
-
-def _fast_tokenize(nlp, text: str):
+def _tokenize_spacy_raw(nlp, text: str):
     """
-    Assignment tokenizer:
-    1. Keep only ASCII by removing any non-ASCII bytes
-    2. Lowercase
-    3. Remove digits 0–9 completely from text (keep punctuation/symbols)
-    4. Tokenize with spaCy
-    5. Skip whitespace tokens
+    Tokenize with spaCy as-is (no ASCII filtering, no lowercasing, no digit removal).
+    Skips whitespace tokens.
     """
     if not isinstance(text, str):
         text = str(text)
-    
-    # Step 1: ASCII-only filtering
-    text = text.encode("ascii", "ignore").decode("ascii")
-    
-    # Step 2 & 3: Lowercase and remove digits completely
-    text = text.lower().translate(_DIGIT_DELETE)
-    
-    # Step 4: spaCy tokenize the cleaned text
     doc = nlp(text)
-    
-    # Step 5: Yield non-whitespace tokens
     for tok in doc:
         if tok.is_space:
             continue
-        t = tok.text
-        if t:
-            yield t
+        yield tok.text
 
 
 # --------------- REQUIRED FUNCTIONS ----------------
+
 def build_index(corpus_dir: str, vocab_path: str) -> InvertedIndex:
     """
     Build a positional inverted index with explicit TF per (term, doc).
-    Uses spaCy tokenizer (no extra normalization).
+    Tokenization uses spaCy's rule-based tokenizer (no stopword removal, no normalization).
     Only tokens present in vocab are indexed.
     Positions are document-wide (single counter across selected fields).
     """
@@ -133,19 +113,23 @@ def build_index(corpus_dir: str, vocab_path: str) -> InvertedIndex:
                 per_doc_positions = defaultdict(list)
                 pos = 0
 
+                # Concatenate all relevant fields into one string and tokenize (spaCy raw)
+                text_parts = []
                 for field in field_order:
-                    if field not in obj:
-                        continue
-                    for token in _fast_tokenize(nlp, obj[field]):
-                        tid = inv.token2id.get(token)
-                        if tid is not None:
-                            per_doc_positions[tid].append(pos)
-                        pos += 1
+                    if field in obj and obj[field]:
+                        text_parts.append(str(obj[field]))
+                text = " ".join(text_parts)
+                for token in _tokenize_spacy_raw(nlp, text):
+                    tid = inv.token2id.get(token)
+                    if tid is not None:
+                        per_doc_positions[tid].append(pos)
+                    pos += 1
 
                 for tid, positions in per_doc_positions.items():
+                    positions_sorted = sorted(positions)
                     inv.postings[tid][did] = {
-                        "tf": len(positions),
-                        "positions": positions
+                        "tf": len(positions_sorted),
+                        "positions": positions_sorted
                     }
 
     return inv
@@ -182,8 +166,7 @@ def save_index(inv: InvertedIndex, index_dir: str) -> None:
         for did in doc_ids_sorted:
             ext_id = inv.id2doc[did]
             entry = postings[did]
-            #term_obj[ext_id] = {"tf": entry["tf"], "pos": sorted(entry["positions"])}
-            term_obj[ext_id] = {"tf": entry["tf"], "positions": entry["positions"]}
+            term_obj[ext_id] = {"tf": entry["tf"], "pos": entry["positions"]}
             
         result[term] = {"df": len(term_obj), "postings": term_obj}
 
@@ -205,11 +188,12 @@ def load_index(index_dir: str) -> dict:
 
 if __name__ == "__main__":
     # Usage: python3 build_index.py <CORPUS_DIR> <VOCAB.txt> <INDEX_DIR>
-    if len(sys.argv) < 4:
+    if len(sys.argv) != 4:
         print(f"Usage: {sys.argv[0]} <CORPUS_DIR> <VOCAB.txt> <INDEX_DIR>")
         sys.exit(1)
 
     corpus_dir, vocab_file, index_dir = sys.argv[1:4]
+
     inv = build_index(corpus_dir, vocab_file)
     save_index(inv, index_dir)
     print(f"Wrote index to: {os.path.join(index_dir, 'index.json')}")
