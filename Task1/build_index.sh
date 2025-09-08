@@ -12,10 +12,12 @@ TIME_FLAG="${4:-}"
 
 mkdir -p "$INDEX_DIR"
 
-RUN_CMD=(python3 build_index.py "$CORPUS_DIR" "$VOCAB_PATH" "$INDEX_DIR")
+RUN_CMD=(python3 "$(dirname "$0")/build_index.py" "$CORPUS_DIR" "$VOCAB_PATH" "$INDEX_DIR")
 
 if [[ "${TIME_FLAG}" == "--time" ]]; then
   time "${RUN_CMD[@]}"
 else
   "${RUN_CMD[@]}"
 fi
+
+# bash Task1/build_index.sh Data/Doc temp/vocab.txt temp/out_index --time

@@ -19,4 +19,4 @@ else
 fi
 
 # Example:
-#   bash tokenize_corpus.sh Data/Doc Data/stopwords.txt temp --time
+#   bash Task0/tokenize_corpus.sh Data/Doc Data/stopwords.txt temp --time 
