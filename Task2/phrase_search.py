@@ -1,566 +1,207 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 """
-phrase_retrieval.py — Assignment 2 / Task 2: Boolean + Phrase Retrieval
+Phrase Search — Task 2
 
-CLI:
-  python phrase_retrieval.py <INDEX_DIR> <QUERY_FILE_PATH> <OUTPUT_DIR>
+Conforms to Assignment.md:
+- Two functions with specific signatures:
+  * phrase_search_query(query: str, index: object) -> list
+  * phrase_search(queryFile: str, index_dir: str, stopword_file: str, outFile: str) -> None
+- Multi-query output must be in TREC-style lines with four fields:
+  qid docid rank score
 
-Assumptions (aligned with the project's coding guide):
-- The inverted index is *positional* and saved (uncompressed) by Task 1.
-- Tokenization order for *both* indexing and querying:
-    1) ASCII filter    -> text.encode("ascii", "ignore").decode("ascii")
-    2) Lowercase       -> text.lower()
-    3) Digit removal   -> translate(_DIGIT_DELETE)
-    4) spaCy tokenize  -> spacy.blank("en") (rule-based & fast)
-- No stopword removal at retrieval time (preserves phrase integrity).
-- Operators: AND, OR, NOT; parentheses supported; implicit ANDs inferred.
-
-Index layout expected in <INDEX_DIR> (choose one of the supported formats):
-  (A) Single JSON file named 'index.json' with structure:
-      {
-        "token": {
-          "doc_id_1": {"tf": int, "positions": [int, ...]},
-          "doc_id_2": {"tf": int, "positions": [int, ...]},
-          ...
-        },
-        ...
-      }
-  (B) Legacy compressed layout (Assignment 1 style): 'index.z' + 'docid_map.z'
-      — if present, we will autodetect and load it for compatibility.
-
-Query file format: JSONL; one object per line, e.g.
-  {"query_id": "1", "title": "\"information retrieval\" AND (neural OR \"deep learning\") NOT survey"}
-
-Output:
-  <OUTPUT_DIR>/docids.txt  in TREC-like format:
-    <qid>\t<docid>\t<rank>\t1
-
+Behavior:
+- Uses spaCy's rule-based English tokenizer (spacy.blank("en")) only. No stopword removal
+  and no normalization beyond spaCy tokenization. This must match Task 0 and Task 1.
+- Exact phrase search using positional postings: tokens appear at consecutive positions.
 """
 
-from __future__ import annotations
-import json
 import os
 import sys
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple, Iterable
+import json
+from typing import Dict, List, Iterable, Tuple, Optional
 
-# -------------------------- spaCy setup --------------------------
 try:
     import spacy
 except ImportError as e:
-    raise SystemExit("spaCy is required. Install with:\n  pip install spacy") from e
-
-# Lightweight, rule-based tokenizer (fast; no model download)
-NLP = spacy.blank("en")
-NLP.max_length = 300_000_000  # allow very large query strings if needed
-
-_DIGIT_DELETE = str.maketrans("", "", "0123456789")
+    raise SystemExit(
+        "spaCy is required. Install with: pip install spacy"
+    ) from e
 
 
-# -------------------------- Utilities --------------------------
-def _ascii_lower_no_digits(text: str) -> str:
-    """Apply the project-specified preprocessing to text."""
-    text = text.encode("ascii", "ignore").decode("ascii")
-    text = text.lower()
-    return text.translate(_DIGIT_DELETE)
+def load_index(index_dir: str) -> Dict[str, dict]:
+    path = os.path.join(index_dir, "index.json")
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
-def _ensure_dir(p: str) -> None:
-    os.makedirs(p, exist_ok=True)
+def init_tokenizer():
+    nlp = spacy.blank("en")  # rule-based English tokenizer; no internet needed
+    nlp.max_length = 300_000_000
+    return nlp
 
 
-def _read_jsonl_any(path: str) -> List[dict]:
-    """
-    Read JSONL that may be UTF-16 (Windows) or UTF-8.
-    Each line is a JSON object.
-    """
-    last_err: Optional[Exception] = None
-    for enc in ("utf-16", "utf-8"):
-        try:
-            with open(path, "r", encoding=enc) as f:
-                lines = [ln.strip().rstrip(",") for ln in f if ln.strip()]
-            out: List[dict] = []
-            for ln in lines:
-                try:
-                    obj = json.loads(ln)
-                    if isinstance(obj, dict):
-                        out.append(obj)
-                except json.JSONDecodeError:
-                    # tolerate malformed lines
-                    continue
-            return out
-        except Exception as e:
-            last_err = e
-    raise RuntimeError(f"Failed to read queries file: {path} ({last_err})")
-
-
-# -------------------------- Index loading --------------------------
-def _vle_decode(buf: bytes, pos: int) -> Tuple[int, int]:
-    """Legacy variable-length decoder (Assignment 1 compatibility)."""
-    x = 0
-    shift = 0
-    while True:
-        b = buf[pos]
-        pos += 1
-        x |= (b & 0x7F) << shift
-        if (b & 0x80) == 0:
-            return x, pos
-        shift += 7
-
-
-def _load_index_json(index_dir: str) -> Dict[str, Dict[str, List[int]]]:
-    """
-    Load positional inverted index from index.json (Assignment 2 schema):
-
-    {
-      "term": {
-        "df": <int>,
-        "postings": {
-          "DOCID_A": {"tf": <int>, "pos": [<int>, ...]},
-          "DOCID_B": {"tf": <int>, "pos": [<int>, ...]}
-        }
-      },
-      ...
-    }
-
-    Returns an internal normalized view:
-        term -> { docid -> [positions...] }
-    """
-    p = os.path.join(index_dir, "index.json")
-    if not os.path.isfile(p):
-        raise FileNotFoundError("index.json not found in index_dir")
-
-    with open(p, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    norm: Dict[str, Dict[str, List[int]]] = {}
-    for term, term_obj in data.items():
-        if not isinstance(term, str) or not isinstance(term_obj, dict):
-            continue
-
-        # Expect keys: "df" and "postings"
-        df_val = term_obj.get("df", None)
-        postings_obj = term_obj.get("postings", {})
-        if not isinstance(postings_obj, dict):
-            postings_obj = {}
-
-        inner: Dict[str, List[int]] = {}
-        for docid, stats in postings_obj.items():
-            # stats must have "tf" and "pos"
-            if not isinstance(stats, dict):
-                continue
-            pos_list = stats.get("pos", [])
-            tf_val = stats.get("tf", None)
-
-            # Defensive normalization
-            if not isinstance(docid, str):
-                docid = str(docid)
-            if not isinstance(pos_list, list):
-                pos_list = []
-            # ensure ints & sorted (assignment writers usually store sorted already)
-            try:
-                positions = [int(x) for x in pos_list]
-            except Exception:
-                positions = []
-
-            # Optional consistency check with tf
-            if isinstance(tf_val, int) and tf_val >= 0 and positions and tf_val != len(positions):
-                # If mismatch, trust positions but you could log a warning here.
-                pass
-
-            inner[docid] = positions
-
-        # Optional consistency check with df
-        if isinstance(df_val, int) and df_val >= 0:
-            # df should equal number of docs with at least one occurrence
-            # (Don’t hard-fail; just a sanity check.)
-            non_empty_docs = sum(1 for v in inner.values() if v)
-            if df_val != non_empty_docs:
-                # You can log a warning here if you want strict auditing.
-                pass
-
-        norm[term] = inner
-
-    return norm
-
-
-def _load_index_legacy_compressed(index_dir: str) -> Dict[str, Dict[str, List[int]]]:
-    """
-    Legacy loader: reads 'docid_map.z' and 'index.z' (Assignment 1 style).
-    Returns token -> docid -> positions[].
-    """
-    import zlib
-
-    with open(os.path.join(index_dir, "docid_map.z"), "rb") as f:
-        compressed_docmap = f.read()
-    doc_id_buffer = zlib.decompress(compressed_docmap)
-
-    pos = 0
-    n, pos = _vle_decode(doc_id_buffer, pos)  # number of docs
-    docid_to_int = {}
-    for _ in range(n):
-        length, pos = _vle_decode(doc_id_buffer, pos)
-        docid = doc_id_buffer[pos:pos+length].decode("utf-8")
-        pos += length
-        doc_int, pos = _vle_decode(doc_id_buffer, pos)
-        docid_to_int[docid] = doc_int
-    int_to_docid = {val: key for key, val in docid_to_int.items()}
-
-    with open(os.path.join(index_dir, "index.z"), "rb") as f:
-        compressed_index = f.read()
-    inv_index_buffer = zlib.decompress(compressed_index)
-
-    inv_index: Dict[str, Dict[str, List[int]]] = {}
-    pos = 0
-    while pos < len(inv_index_buffer):
-        term_len, pos = _vle_decode(inv_index_buffer, pos)
-        term = inv_index_buffer[pos:pos+term_len].decode("utf-8")
-        pos += term_len
-
-        df, pos = _vle_decode(inv_index_buffer, pos)
-        postings: Dict[str, List[int]] = {}
-        doc_ids = []
-        for _ in range(df):
-            doc_gap, pos = _vle_decode(inv_index_buffer, pos)
-            doc_ids.append(doc_gap if not doc_ids else doc_ids[-1] + doc_gap)
-
-            tf, pos = _vle_decode(inv_index_buffer, pos)
-            positions: List[int] = []
-            for _ in range(tf):
-                gap, pos = _vle_decode(inv_index_buffer, pos)
-                positions.append(gap if not positions else positions[-1] + gap)
-
-            postings[int_to_docid[doc_ids[-1]]] = positions
-        inv_index[term] = postings
-    return inv_index
-
-
-def load_index(index_dir: str) -> Dict[str, Dict[str, List[int]]]:
-    """
-    Autodetect and load a positional inverted index from index_dir.
-
-    Preferred: index.json  (Assignment 2)
-    Fallback:  legacy compressed  (Assignment 1)
-    """
-    json_path = os.path.join(index_dir, "index.json")
-    if os.path.isfile(json_path):
-        return _load_index_json(index_dir)
-    # Legacy?
-    i_z = os.path.join(index_dir, "index.z")
-    d_z = os.path.join(index_dir, "docid_map.z")
-    if os.path.isfile(i_z) and os.path.isfile(d_z):
-        return _load_index_legacy_compressed(index_dir)
-    raise FileNotFoundError(
-        f"No supported index files in {index_dir}. Expected 'index.json' or legacy 'index.z' + 'docid_map.z'.")
-
-
-# -------------------------- Query parsing --------------------------
-OPERATORS: Set[str] = {"AND", "OR", "NOT"}
-
-@dataclass(frozen=True)
-class Atom:
-    """
-    Represents a query atom:
-      - kind = "TOKEN": single token, .tokens = ["foo"]
-      - kind = "PHRASE": multi-token phrase, .tokens = ["new", "york"]
-    """
-    kind: str
-    tokens: Tuple[str, ...]  # immutable for hashing/caching
-
-
-def _spacy_tokens(text: str) -> List[str]:
-    """spaCy tokenization after the required preprocessing."""
-    clean = _ascii_lower_no_digits(text)
-    doc = NLP(clean)
+def tokenize_query(nlp, text: str) -> List[str]:
+    doc = nlp(text if isinstance(text, str) else str(text))
     return [t.text for t in doc if not t.is_space]
 
 
-def lex_query(raw_query: str) -> List[object]:
+def phrase_match_in_doc(positions_lists: List[List[int]]) -> bool:
     """
-    Lex the raw query into a stream of:
-      - Atom(kind="TOKEN", tokens=(tok,))
-      - Atom(kind="PHRASE", tokens=(tok1, tok2, ...))
-      - Operator strings: "AND" | "OR" | "NOT"
-      - Parentheses: "(" | ")"
-
-    Rules:
-      - Double quotes define phrases: "new york"
-      - Outside quotes, we tokenize with spaCy; multi-token runs are emitted
-        as multiple TOKEN atoms. (Implicit ANDs will be inserted separately.)
-      - Operators are case-insensitive in input; we emit uppercase.
+    positions_lists[i] is the sorted list of positions of the i-th query token
+    in the same document. Returns True if there exists a starting position p in
+    positions_lists[0] such that for every i >= 1, (p + i) is in positions_lists[i].
     """
-    s = _ascii_lower_no_digits(raw_query)
-
-    out: List[object] = []
-    i, n = 0, len(s)
-    while i < n:
-        ch = s[i]
-        if ch.isspace():
-            i += 1
-            continue
-        if ch == "(" or ch == ")":
-            out.append(ch)
-            i += 1
-            continue
-        if ch == '"':
-            # phrase
-            j = i + 1
-            while j < n and s[j] != '"':
-                j += 1
-            phrase_text = s[i+1:j]  # may be empty
-            toks = _spacy_tokens(phrase_text)
-            if toks:
-                out.append(Atom("PHRASE", tuple(toks)))
-            i = j + 1 if j < n else n
-            continue
-
-        # parse a word-ish chunk until whitespace or paren or quote
-        j = i
-        while j < n and (not s[j].isspace()) and s[j] not in '()"':
-            j += 1
-        chunk = s[i:j]
-        i = j
-
-        # Is it an operator?
-        if chunk in ("and", "or", "not"):
-            out.append(chunk.upper())
-            continue
-
-        # Otherwise, tokenize this chunk with spaCy and emit TOKEN atoms
-        toks = _spacy_tokens(chunk)
-        for t in toks:
-            out.append(Atom("TOKEN", (t,)))
-    return out
-
-
-def _is_atom(x: object) -> bool:
-    return isinstance(x, Atom)
-
-
-def insert_implicit_ands(tokens: List[object]) -> List[object]:
-    """
-    Insert AND between:
-      - atom )    (  atom NOT
-      - ) (
-    """
-    out: List[object] = []
-    prev: Optional[object] = None
-    for cur in tokens:
-        if prev is not None:
-            need_and = (
-                (_is_atom(prev) or prev == ")")
-                and (_is_atom(cur) or cur in {"(", "NOT"})
-            )
-            if need_and:
-                out.append("AND")
-        out.append(cur)
-        prev = cur
-    return out
-
-
-def to_postfix(tokens: List[object]) -> List[object]:
-    """Shunting-yard: operators to postfix; atoms flow through."""
-    prec = {"NOT": 3, "AND": 2, "OR": 1}
-    right_assoc = {"NOT"}
-    out: List[object] = []
-    st: List[str] = []
-    for tok in tokens:
-        if _is_atom(tok):
-            out.append(tok)
-        elif isinstance(tok, str) and tok in OPERATORS:
-            while st:
-                top = st[-1]
-                if isinstance(top, str) and top in OPERATORS:
-                    if ((tok not in right_assoc and prec[tok] <= prec[top]) or
-                        (tok in right_assoc and prec[tok] <  prec[top])):
-                        out.append(st.pop()); continue
-                break
-            st.append(tok)
-        elif tok == "(":
-            st.append(tok)  # type: ignore
-        elif tok == ")":
-            while st and st[-1] != "(":
-                out.append(st.pop())
-            if not st:
-                raise ValueError("mismatched ')'")
-            st.pop()  # pop "("
-        else:
-            raise ValueError(f"Unexpected token: {tok}")
-    while st:
-        top = st.pop()
-        if top in {"(", ")"}:
-            raise ValueError("mismatched parens")
-        out.append(top)
-    return out
-
-
-# -------------------------- Evaluation --------------------------
-class BooleanPhraseEvaluator:
-    def __init__(self, index: Dict[str, Dict[str, List[int]]]):
-        self.idx = index
-        all_docs: Set[str] = set()
-        for posting in index.values():
-            all_docs.update(posting.keys())
-        self._universe = all_docs
-        # Simple caches to avoid recomputation on complex queries
-        self._token_cache: Dict[str, Set[str]] = {}
-        self._phrase_cache: Dict[Tuple[str, ...], Set[str]] = {}
-
-    # ---- Basic accessors ----
-    def docs_for_token(self, tok: str) -> Set[str]:
-        s = self._token_cache.get(tok)
-        if s is not None:
-            return s
-        s = set(self.idx.get(tok, {}).keys())
-        self._token_cache[tok] = s
-        return s
-
-    # ---- Phrase matching ----
-    @staticmethod
-    def _phrase_occurs_in_doc(pos_lists: List[List[int]]) -> bool:
-        """
-        Given k position lists (already filtered to the same doc),
-        return True iff there exists p in pos_lists[0] such that
-        for each i>0, there is an occurrence at p+i in pos_lists[i].
-
-        Two-pointer sweep that only moves forward across lists.
-        """
-        k = len(pos_lists)
-        if k == 1:
-            return len(pos_lists[0]) > 0
-
-        # Index pointers for lists 1..k-1 (we scan base positions from list0)
-        ptrs = [0] * k
-        base = pos_lists[0]
-        for p in base:
-            ok = True
-            prev = p
-            # For each subsequent list, advance pointer until >= prev+1
-            for i in range(1, k):
-                lst = pos_lists[i]
-                j = ptrs[i]
-                need = prev + 1
-                # advance monotonically
-                L = len(lst)
-                while j < L and lst[j] < need:
-                    j += 1
-                ptrs[i] = j
-                if j >= L or lst[j] != need:
-                    ok = False
-                    break
-                prev = lst[j]
-            if ok:
-                return True
+    if not positions_lists:
         return False
+    if len(positions_lists) == 1:
+        return len(positions_lists[0]) > 0
 
-    def docs_for_phrase(self, phrase: Tuple[str, ...]) -> Set[str]:
-        cached = self._phrase_cache.get(phrase)
-        if cached is not None:
-            return cached
-
-        # Gather postings for each token in phrase
-        postings_per_token: List[Dict[str, List[int]]] = []
-        for tok in phrase:
-            postings = self.idx.get(tok)
-            if not postings:
-                self._phrase_cache[phrase] = set()
-                return set()
-            postings_per_token.append(postings)
-
-        # Intersect candidate doc sets, starting from the rarest token
-        # (helps prune early).
-        # Build (token_index, doc_set) pairs to sort by df.
-        token_docsets = [(i, set(p.keys())) for i, p in enumerate(postings_per_token)]
-        token_docsets.sort(key=lambda x: len(x[1]))  # increasing df
-        candidate_docs = token_docsets[0][1].copy()
-        for _, s in token_docsets[1:]:
-            candidate_docs.intersection_update(s)
-            if not candidate_docs:
-                self._phrase_cache[phrase] = set()
-                return set()
-
-        # For each candidate doc, check adjacency using the stored positions
-        hits: Set[str] = set()
-        for d in candidate_docs:
-            pos_lists = [postings_per_token[i][d] for i in range(len(postings_per_token))]
-            if self._phrase_occurs_in_doc(pos_lists):
-                hits.add(d)
-
-        self._phrase_cache[phrase] = hits
-        return hits
-
-    # ---- Boolean eval on postfix ----
-    def eval_postfix(self, postfix: List[object]) -> Set[str]:
-        st: List[Set[str]] = []
-        for tok in postfix:
-            if isinstance(tok, Atom):
-                if tok.kind == "TOKEN":
-                    st.append(self.docs_for_token(tok.tokens[0]))
-                elif tok.kind == "PHRASE":
-                    st.append(self.docs_for_phrase(tok.tokens))
-                else:
-                    raise ValueError(f"Unknown atom kind {tok.kind}")
-            elif tok == "NOT":
-                if not st:
-                    raise ValueError("NOT missing operand")
-                s = st.pop()
-                st.append(self._universe - s)
-            elif tok in {"AND", "OR"}:
-                if len(st) < 2:
-                    raise ValueError(f"{tok} missing operands")
-                b = st.pop(); a = st.pop()
-                st.append(a & b if tok == "AND" else a | b)
-            else:
-                raise ValueError(f"Unexpected token in postfix: {tok}")
-        if len(st) != 1:
-            raise ValueError("Invalid expression")
-        return st[0]
+    # For efficient membership checks, convert subsequent lists to sets.
+    sets = [set(lst) for lst in positions_lists]
+    first = positions_lists[0]
+    for p in first:
+        ok = True
+        for i in range(1, len(positions_lists)):
+            if (p + i) not in sets[i]:
+                ok = False
+                break
+        if ok:
+            return True
+    return False
 
 
-# -------------------------- Public API --------------------------
-def boolean_phrase_retrieval(index_dir: str, query_file: str, output_dir: str) -> None:
+def _phrase_search_candidates(index: Dict[str, dict], query_tokens: List[str]) -> List[str]:
+    if not query_tokens:
+        return []
+    for tok in query_tokens:
+        if tok not in index:
+            return []
+    posting_keys = [set(index[tok]["postings"].keys()) for tok in query_tokens]
+    if not posting_keys:
+        return []
+    candidate_docs = set.intersection(*posting_keys)
+    if not candidate_docs:
+        return []
+    matches = []
+    for doc_id in candidate_docs:
+        positions_lists = []
+        for tok in query_tokens:
+            entry = index[tok]["postings"][doc_id]
+            positions = entry.get("pos") if isinstance(entry, dict) else None
+            if positions is None:
+                positions = entry.get("positions", [])
+            positions_lists.append(list(positions))
+        if phrase_match_in_doc(positions_lists):
+            matches.append(doc_id)
+    matches.sort()
+    return matches
+
+
+# Public API per Assignment.md
+def phrase_search_query(query: str, index: dict) -> list:
+    """Given the query string, return all matching document IDs (exact phrase)."""
+    nlp = init_tokenizer()
+    toks = tokenize_query(nlp, query)
+    return _phrase_search_candidates(index, toks)
+
+
+def phrase_search(queryFile: str, index_dir: str, stopword_file: str, outFile: str) -> None:
+    """Given a file containing queries, write results in TREC format to outFile.
+
+    TREC format: one line per hit -> "qid docid rank score"
+    For boolean retrieval, score is a constant (1). Rank is 1..N in lexicographic docid order.
     """
-    Load index, read queries, run boolean+phrase retrieval, and write TREC output.
-    """
-    idx = load_index(index_dir)
-    ev = BooleanPhraseEvaluator(idx)
+    index = load_index(index_dir)
+    nlp = init_tokenizer()
+    queries = list(_read_queries_json(queryFile))
+    with open(outFile, "w", encoding="utf-8") as out:
+        for qid, text in queries:
+            toks = tokenize_query(nlp, text)
+            matches = _phrase_search_candidates(index, toks)
+            rank = 1
+            for doc_id in matches:
+                out.write(f"{qid} {doc_id} {rank} 1\n")
+                rank += 1
 
-    _ensure_dir(output_dir)
-    out_path = os.path.join(output_dir, "docids.txt")
-    with open(out_path, "w", encoding="utf-8") as out:
-        for q in _read_jsonl_any(query_file):
-            qid = str(q.get("query_id", "")).strip()
-            title = str(q.get("title", "")).strip()
-            if not qid or not title:
+
+def _read_queries_json(path: str) -> Iterable[Tuple[str, str]]:
+    """Attempt to read a JSON or JSONL file of queries.
+    Accepts lines with objects having keys like: (query_id|qid|id) and (query|text|title).
+    Yields (qid, text).
+    """
+    # Try JSON-lines first
+    try:
+        with open(path, "r", encoding="utf-16") as f:
+            content = f.read().strip()
+    except UnicodeDecodeError:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+    if not content:
+        return []
+
+    # Try JSON-lines
+    lines = content.splitlines()
+    if len(lines) > 1:
+        out = []
+        for line in lines:
+            line = line.strip()
+            if not line:
                 continue
-            # Parse
-            lexed = lex_query(title)
-            lexed = insert_implicit_ands(lexed)
-            postfix = to_postfix(lexed)
-            # Evaluate
-            docs = ev.eval_postfix(postfix)
-            # Deterministic ordering
-            for rank, docid in enumerate(sorted(docs), start=1):
-                out.write(f"{qid}\t{docid}\t{rank}\t1\n")
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            qid = obj.get("query_id") or obj.get("qid") or obj.get("id") or ""
+            q = obj.get("query") or obj.get("text") or obj.get("title") or ""
+            if q:
+                out.append((str(qid) if qid != "" else q[:30], q))
+        return out
 
+    # Else try parsing as a single JSON object/array
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        return []
+    out = []
+    if isinstance(data, list):
+        for obj in data:
+            if not isinstance(obj, dict):
+                continue
+            qid = obj.get("query_id") or obj.get("qid") or obj.get("id") or ""
+            q = obj.get("query") or obj.get("text") or obj.get("title") or ""
+            if q:
+                out.append((str(qid) if qid != "" else q[:30], q))
+    elif isinstance(data, dict):
+        # either mapping id->text or an object with 'queries'
+        if "queries" in data and isinstance(data["queries"], list):
+            for obj in data["queries"]:
+                if not isinstance(obj, dict):
+                    continue
+                qid = obj.get("query_id") or obj.get("qid") or obj.get("id") or ""
+                q = obj.get("query") or obj.get("text") or obj.get("title") or ""
+                if q:
+                    out.append((str(qid) if qid != "" else q[:30], q))
+        else:
+            for k, v in data.items():
+                out.append((str(k), str(v)))
+    return out
 
-# -------------------------- CLI --------------------------
-def _usage() -> None:
-    sys.stderr.write(
-        "Usage:\n"
-        "  python phrase_retrieval.py <INDEX_DIR> <QUERY_FILE_PATH> <OUTPUT_DIR>\n"
-    )
 
 def main(argv: List[str]) -> int:
-    if len(argv) != 4:
-        _usage()
-        return 2
-    index_dir, query_file, output_dir = argv[1:4]
-    boolean_phrase_retrieval(index_dir, query_file, output_dir)
+    import argparse
+    ap = argparse.ArgumentParser(prog="phrase_search.py")
+    # Shell compatibility: phrase_search.sh <INDEX_DIR> <QUERY_FILE_PATH> <OUTPUT_DIR> <PATH_OF_STOPWORDS_FILE>
+    ap.add_argument("index_dir", help="Directory containing index.json from Task 1")
+    ap.add_argument("query_file", help="Path to query JSON/JSONL file")
+    ap.add_argument("output_dir", help="Directory where phrasesearchdocids.txt is written")
+    ap.add_argument("stopwords", help="Stopwords file path (ignored)")
+    args = ap.parse_args(argv)
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    out_path = os.path.join(args.output_dir, "phrase_search_docids.txt")
+    phrase_search(args.query_file, args.index_dir, args.stopwords, out_path)
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    sys.exit(main(sys.argv[1:]))

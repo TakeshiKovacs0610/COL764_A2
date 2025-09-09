@@ -4,6 +4,8 @@
 #   python evaluate_ir.py --qrels qrels.json --run bm25_docids.txt [--k 100]
 #   (qrels.json is JSONL; run is TREC format: qid docid rank score)
 
+# python Scoring/evaluate_ir.py --qrels Scoring/qrels.json --run temp/output/bm25_docids.txt
+
 import argparse
 import json
 from collections import defaultdict
@@ -11,17 +13,30 @@ from collections import defaultdict
 def load_qrels_jsonl(path):
     """Load qrels from JSONL; return dict[qid] -> set of relevant doc_ids (relevance > 0)."""
     rel = defaultdict(set)
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line: 
-                continue
-            obj = json.loads(line)
-            qid = str(obj["query_id"]).strip()
-            doc = str(obj["doc_id"]).strip()
-            rel_val = int(obj.get("relevance", 0))
-            if rel_val > 0:
-                rel[qid].add(doc)
+    try:
+        with open(path, "r", encoding="utf-16") as f:
+            for line in f:
+                line = line.strip()
+                if not line: 
+                    continue
+                obj = json.loads(line)
+                qid = str(obj["query_id"]).strip()
+                doc = str(obj["doc_id"]).strip()
+                rel_val = int(obj.get("relevance", 0))
+                if rel_val > 0:
+                    rel[qid].add(doc)
+    except UnicodeError:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line: 
+                    continue
+                obj = json.loads(line)
+                qid = str(obj["query_id"]).strip()
+                doc = str(obj["doc_id"]).strip()
+                rel_val = int(obj.get("relevance", 0))
+                if rel_val > 0:
+                    rel[qid].add(doc)
     return rel
 
 def load_run_trec(path):
@@ -31,27 +46,50 @@ def load_run_trec(path):
     Return dict[qid] -> list of (docid, rank, score), sorted by rank asc.
     """
     run = defaultdict(list)
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split()
-            if len(parts) < 4:
-                # allow optional extra columns but require at least 4
-                raise ValueError(f"Bad run line (need at least 4 fields): {line}")
-            qid, docid, rank_str, score_str = parts[:4]
-            try:
-                rank = int(rank_str)
-            except ValueError:
-                # Some runs use an extra column before rank. Try to parse last two as rank/score
-                # but keep strictness for this assignment.
-                raise
-            try:
-                score = float(score_str)
-            except ValueError:
-                score = 0.0
-            run[qid].append((docid, rank, score))
+    try:
+        with open(path, "r", encoding="utf-16") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split()
+                if len(parts) < 4:
+                    # allow optional extra columns but require at least 4
+                    raise ValueError(f"Bad run line (need at least 4 fields): {line}")
+                qid, docid, rank_str, score_str = parts[:4]
+                try:
+                    rank = int(rank_str)
+                except ValueError:
+                    # Some runs use an extra column before rank. Try to parse last two as rank/score
+                    # but keep strictness for this assignment.
+                    raise
+                try:
+                    score = float(score_str)
+                except ValueError:
+                    score = 0.0
+                run[qid].append((docid, rank, score))
+    except UnicodeError:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split()
+                if len(parts) < 4:
+                    # allow optional extra columns but require at least 4
+                    raise ValueError(f"Bad run line (need at least 4 fields): {line}")
+                qid, docid, rank_str, score_str = parts[:4]
+                try:
+                    rank = int(rank_str)
+                except ValueError:
+                    # Some runs use an extra column before rank. Try to parse last two as rank/score
+                    # but keep strictness for this assignment.
+                    raise
+                try:
+                    score = float(score_str)
+                except ValueError:
+                    score = 0.0
+                run[qid].append((docid, rank, score))
     # sort by rank
     for q in run:
         run[q].sort(key=lambda t: t[1])

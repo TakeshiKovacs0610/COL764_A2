@@ -20,4 +20,4 @@ else
   "${RUN_CMD[@]}"
 fi
 
-# bash Task1/build_index.sh Data/Doc temp/vocab.txt temp/out_index --time
+# bash Task1/build_index.sh Data/Doc temp1/vocab.txt temp1/out_index --time

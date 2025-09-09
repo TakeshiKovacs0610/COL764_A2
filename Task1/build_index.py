@@ -27,6 +27,8 @@ class InvertedIndex:
         self.id2token = []                  # term_id -> token
         self.doc2id = {}                    # ext_doc_id -> internal int id
         self.id2doc = []                    # internal int id -> ext_doc_id
+        # For BM25 stats
+        self.doc_len = {}                   # ext_doc_id -> int (token count post-tokenization)
 
     def load_vocab(self, vocab_path: str):
         with open(vocab_path, "r", encoding="utf-8") as f:
@@ -125,6 +127,9 @@ def build_index(corpus_dir: str, vocab_path: str) -> InvertedIndex:
                         per_doc_positions[tid].append(pos)
                     pos += 1
 
+                # Record document length for BM25 normalization (post-tokenization count)
+                inv.doc_len[ext_doc_id] = pos
+
                 for tid, positions in per_doc_positions.items():
                     positions_sorted = sorted(positions)
                     inv.postings[tid][did] = {
@@ -186,6 +191,33 @@ def load_index(index_dir: str) -> dict:
         return json.load(f)
 
 
+def save_bm25_stats(inv: InvertedIndex, index_dir: str) -> None:
+    """
+    Save BM25-global statistics alongside index.json as bm25.json.
+    Structure:
+    {
+      "N": <int>,
+      "avgdl": <float>,
+      "doc_len": { "ext_doc_id": <int>, ... },
+      "hyperparams": { "k1": 1.5, "b": 0.75, "k3": 0, "idf_clamp_zero": true }
+    }
+    """
+    os.makedirs(index_dir, exist_ok=True)
+    N = len(inv.id2doc)
+    # avgdl over recorded doc lengths (fallback to 0.0 for empty)
+    lengths = list(inv.doc_len.values())
+    avgdl = (sum(lengths) / len(lengths)) if lengths else 0.0
+    payload = {
+        "N": N,
+        "avgdl": avgdl,
+        "doc_len": inv.doc_len,
+        "hyperparams": {"k1": 1.5, "b": 0.75, "k3": 0, "idf_clamp_zero": True},
+    }
+    out_path = os.path.join(index_dir, "bm25.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, separators=(",", ":"))
+
+
 if __name__ == "__main__":
     # Usage: python3 build_index.py <CORPUS_DIR> <VOCAB.txt> <INDEX_DIR>
     if len(sys.argv) != 4:
@@ -196,4 +228,6 @@ if __name__ == "__main__":
 
     inv = build_index(corpus_dir, vocab_file)
     save_index(inv, index_dir)
+    save_bm25_stats(inv, index_dir)
     print(f"Wrote index to: {os.path.join(index_dir, 'index.json')}")
+    print(f"Wrote BM25 stats to: {os.path.join(index_dir, 'bm25.json')}")
