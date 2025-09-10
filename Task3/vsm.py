@@ -60,10 +60,11 @@ def vsm_query(query: str, vsm_index: dict, k: int) -> list:
             w_td = (1 + math.log(tf)) * idf[term]
             scores[doc] += w_tq * w_td
 
-    # 4. Normalize by doc norms
+    # 4. Normalize by doc norms and query norm
+    q_norm = math.sqrt(sum(w**2 for w in q_weights.values()))
     for doc in list(scores.keys()):
-        if doc in doc_norms and doc_norms[doc] > 0:
-            scores[doc] /= doc_norms[doc]
+        if doc in doc_norms and doc_norms[doc] > 0 and q_norm > 0:
+            scores[doc] /= (doc_norms[doc] * q_norm)
 
     # 5. Sort and return top-k
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
