@@ -11,6 +11,7 @@ Index handling follows Task1's index.json format, plus bm25.json with doc-level 
 
 Tokenization uses spaCy's rule-based English tokenizer (spacy.blank("en")).
 Stopword file is accepted but not used (per instructions).
+Uses only the "title" field from queries.
 
 CLI usage mirrors other tasks via a shell wrapper:
   python3 bm25_retrieval.py <INDEX_DIR> <QUERY_FILE_PATH> <OUTPUT_DIR> <PATH_OF_STOPWORDS_FILE> <k>
@@ -21,7 +22,7 @@ import os
 import sys
 import json
 import math
-from typing import Dict, List, Tuple, Iterable
+from typing import Dict, List, Tuple, Iterable, Optional
 
 try:
     import spacy
@@ -54,11 +55,14 @@ def _tokenize(nlp, text: str) -> List[str]:
     return [t.text for t in doc if not t.is_space]
 
 
-def _read_queries_json(path: str) -> Iterable[Tuple[str, str]]:
+def _read_queries_json(path: str, fields: Optional[List[str]] = None) -> Iterable[Tuple[str, str]]:
     """Read queries in flexible JSON/JSONL formats.
-    Accepts entries with keys: (query_id|qid|id) and (query|text|title).
+    Accepts entries with keys: (query_id|qid|id) and various text fields.
     Yields (qid, text).
     """
+    if fields is None:
+        fields = ["title"]  # Only use title field by default
+    
     try:
         with open(path, "r", encoding="utf-16") as f:
             content = f.read().strip()
@@ -79,7 +83,14 @@ def _read_queries_json(path: str) -> Iterable[Tuple[str, str]]:
             except json.JSONDecodeError:
                 continue
             qid = obj.get("query_id") or obj.get("qid") or obj.get("id") or ""
-            q = obj.get("query") or obj.get("text") or obj.get("title") or ""
+            
+            # Concatenate chosen fields
+            text_parts = []
+            for field in fields:
+                if obj.get(field):
+                    text_parts.append(str(obj[field]))
+            q = " ".join(text_parts)
+            
             if q:
                 out.append((str(qid) if qid != "" else q[:30], q))
         return out
@@ -94,7 +105,14 @@ def _read_queries_json(path: str) -> Iterable[Tuple[str, str]]:
             if not isinstance(obj, dict):
                 continue
             qid = obj.get("query_id") or obj.get("qid") or obj.get("id") or ""
-            q = obj.get("query") or obj.get("text") or obj.get("title") or ""
+            
+            # Concatenate chosen fields
+            text_parts = []
+            for field in fields:
+                if obj.get(field):
+                    text_parts.append(str(obj[field]))
+            q = " ".join(text_parts)
+            
             if q:
                 out.append((str(qid) if qid != "" else q[:30], q))
     elif isinstance(data, dict):
@@ -103,7 +121,14 @@ def _read_queries_json(path: str) -> Iterable[Tuple[str, str]]:
                 if not isinstance(obj, dict):
                     continue
                 qid = obj.get("query_id") or obj.get("qid") or obj.get("id") or ""
-                q = obj.get("query") or obj.get("text") or obj.get("title") or ""
+                
+                # Concatenate chosen fields
+                text_parts = []
+                for field in fields:
+                    if obj.get(field):
+                        text_parts.append(str(obj[field]))
+                q = " ".join(text_parts)
+                
                 if q:
                     out.append((str(qid) if qid != "" else q[:30], q))
         else:
@@ -182,16 +207,19 @@ def bm25_query(query: str, index: object, k: int) -> list:
     return items[:k]
 
 
-def bm25(queryFile: str, index_dir: str, stopword_file: str, k: int, outFile: str) -> None:
+def bm25(queryFile: str, index_dir: str, stopword_file: str, k: int, outFile: str, fields: Optional[List[str]] = None) -> None:
     """Run BM25 for all queries from queryFile and write TREC-style results to outFile.
 
     Each output line: "qid docid rank score"
     Rank starts at 1. Writes up to k lines per query (fewer if not enough matches).
     """
+    if fields is None:
+        fields = ["title"]  # Only use title field by default
+        
     lex = _load_index(index_dir)
     bm = _load_bm25(index_dir)
     combo = {"lexicon": lex, "bm25": bm}
-    queries = list(_read_queries_json(queryFile))
+    queries = list(_read_queries_json(queryFile, fields))
     with open(outFile, "w", encoding="utf-8") as out:
         for qid, text in queries:
             results = bm25_query(text, combo, k)
