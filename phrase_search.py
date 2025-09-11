@@ -98,11 +98,11 @@ def _phrase_search_candidates(index: Dict[str, dict], query_tokens: List[str]) -
 
 
 # Public API per Assignment.md
-def phrase_search_query(query: str, index: dict) -> list:
+def phrase_search_query(query: str, index: object) -> list:
     """Given the query string, return all matching document IDs (exact phrase)."""
     nlp = init_tokenizer()
     toks = tokenize_query(nlp, query)
-    return _phrase_search_candidates(index, toks)
+    return _phrase_search_candidates(index, toks) # type: ignore
 
 
 def phrase_search(queryFile: str, index_dir: str, outFile: str) -> None:

@@ -43,14 +43,14 @@ def _build_query_vector(tokens, idf):
 # PRF Query Function
 # -----------------------------
 
-def prf_query(query: str, index: Dict[str, Any], k: int) -> List[Tuple[str, float]]:
+def prf_query(query: str, index: object, k: int) -> List[Tuple[str, float]]:
     """
     Given a query string, return top-k documents with scores AFTER one round of PRF.
     """
-    idf = index["idf"]
-    postings = index["postings"]
-    doc_norms = index["doc_norms"]
-    documents = index["documents"]
+    idf = index["idf"] # type: ignore
+    postings = index["postings"] # type: ignore
+    doc_norms = index["doc_norms"] # type: ignore
+    documents = index["documents"] # type: ignore
 
     # Hyperparameters (can be tuned)
     R = 55      # top R docs used for feedback

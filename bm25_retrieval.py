@@ -69,13 +69,13 @@ def _tokenize(nlp, text: str) -> List[str]:
     return [t.text for t in doc if not t.is_space]
 
 
-def _read_queries_json(path: str, fields: Optional[List[str]] = None) -> Iterable[Tuple[str, str]]:
+def _read_queries_json(path: str) -> Iterable[Tuple[str, str]]:
     """Read queries in flexible JSON/JSONL formats.
     Accepts entries with keys: (query_id|qid|id) and various text fields.
     Yields (qid, text).
+    Uses only the "title" field.
     """
-    if fields is None:
-        fields = ["title"]  # Only use title field by default
+    fields = ["title"]
     
     try:
         with open(path, "r", encoding="utf-16") as f:
@@ -221,19 +221,18 @@ def bm25_query(query: str, index: object, k: int) -> list:
     return items[:k]
 
 
-def bm25(queryFile: str, index_dir: str, k: int, outFile: str, fields: Optional[List[str]] = None) -> None:
+def bm25(queryFile: str, index_dir: str, k: int, outFile: str) -> None:
     """Run BM25 for all queries from queryFile and write TREC-style results to outFile.
 
     Each output line: "qid docid rank score"
     Rank starts at 1. Writes up to k lines per query (fewer if not enough matches).
+    Uses only the "title" field from queries.
     """
-    if fields is None:
-        fields = ["title"]  # Only use title field by default
         
     lex = _load_index(index_dir)
     bm = _load_bm25(index_dir)
     combo = {"lexicon": lex, "bm25": bm}
-    queries = list(_read_queries_json(queryFile, fields))
+    queries = list(_read_queries_json(queryFile))
     with open(outFile, "w", encoding="utf-8") as out:
         for qid, text in queries:
             results = bm25_query(text, combo, k)

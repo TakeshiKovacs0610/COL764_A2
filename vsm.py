@@ -27,15 +27,15 @@ def _tokenize_spacy_raw(nlp, text: str):
 
 # ---------------- QUERY FUNCTION ----------------
 
-def vsm_query(query: str, vsm_index: dict, k: int) -> list:
+def vsm_query(query: str, vsm_index: object, k: int) -> list:
     """
     Given a query string, return the top-k documents ranked by cosine similarity
     using log-normalized TF-IDF weighting.
     """
     nlp = _init_tokenizer()
-    idf = vsm_index["idf"]
-    doc_norms = vsm_index["doc_norms"]
-    postings = vsm_index["postings"]
+    idf = vsm_index["idf"] # type: ignore
+    doc_norms = vsm_index["doc_norms"] # type: ignore
+    postings = vsm_index["postings"] # type: ignore
 
     # 1. Build query term frequency
     q_tf = defaultdict(int)
@@ -72,13 +72,13 @@ def vsm_query(query: str, vsm_index: dict, k: int) -> list:
 
 # ---------------- MULTI-QUERY DRIVER ----------------
 
-def _read_queries_json(path: str, fields: Optional[List[str]] = None):
+def _read_queries_json(path: str):
     """Read queries in flexible JSON/JSONL formats.
     Accepts entries with keys: (query_id|qid|id) and various text fields.
     Yields (qid, text).
+    Uses only the "title" field.
     """
-    if fields is None:
-        fields = ["title"]  # Only use title field by default
+    fields = ["title"]
     
     try:
         with open(path, "r", encoding="utf-16") as f:
@@ -154,15 +154,13 @@ def _read_queries_json(path: str, fields: Optional[List[str]] = None):
     return out
 
 
-def vsm(queryFile: str, index_dir: str, k: int, outFile: str, fields: Optional[List[str]] = None) -> None:
+def vsm(queryFile: str, index_dir: str, k: int, outFile: str) -> None:
     """
     Given a JSONL file containing queries, run VSM retrieval for each query
     and write top-k results to outFile in required format:
     qid docid rank score
+    Uses only the "title" field from queries.
     """
-    
-    if fields is None:
-        fields = ["title"]  # Only use title field by default
 
     # load vsm index
     with open(os.path.join(index_dir, "vsm.json"), "r", encoding="utf-8") as f:
@@ -172,7 +170,7 @@ def vsm(queryFile: str, index_dir: str, k: int, outFile: str, fields: Optional[L
     os.makedirs(os.path.dirname(outFile), exist_ok=True)
 
     nlp = _init_tokenizer()
-    queries = list(_read_queries_json(queryFile, fields))
+    queries = list(_read_queries_json(queryFile))
     
     with open(outFile, "w", encoding="utf-8") as out:
         for qid, text in queries:
