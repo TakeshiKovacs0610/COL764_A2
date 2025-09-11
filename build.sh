@@ -1,3 +1,6 @@
+# We assume that the SpaCy library is already installed in the environment.
+
+# pip install spacy
 # bash tokenize_corpus.sh Data/Doc temp --time
 
 # bash build_index.sh Data/Doc temp/vocab.txt temp/out_index --time

@@ -250,7 +250,7 @@ def main(argv: List[str]) -> int:
     args = ap.parse_args(argv)
 
     os.makedirs(args.output_dir, exist_ok=True)
-    out_path = os.path.join(args.output_dir, "bm25_docids.txt")
+    out_path = os.path.join(args.output_dir, "bm25_retrieval_docids.txt")
     bm25(args.query_file, args.index_dir, args.k, out_path)
     return 0
 
