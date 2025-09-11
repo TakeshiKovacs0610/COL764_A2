@@ -53,10 +53,10 @@ def prf_query(query: str, index: Dict[str, Any], k: int) -> List[Tuple[str, floa
     documents = index["documents"]
 
     # Hyperparameters (can be tuned)
-    R = 10      # top R docs used for feedback
+    R = 55      # top R docs used for feedback
     alpha = 1.0 # weight of original query
     beta = 0.8  # weight of feedback terms
-    top_m = 10  # keep top-m feedback terms
+    top_m = 45  # keep top-m feedback terms
 
     # 1. Build initial query vector
     tokens = query.split()
@@ -194,7 +194,7 @@ def _read_queries_json(path: str, fields: Optional[List[str]] = None):
 def prf(queryFile: str, index_dir: str, k: int, outFile: str) -> None:
     """
     Process query file and write PRF results in TREC-eval format:
-    qid Q0 docid rank score PRF
+    qid docid rank score
     """
 
     fields = ["title"]
@@ -222,7 +222,7 @@ def prf(queryFile: str, index_dir: str, k: int, outFile: str) -> None:
             clean_query = " ".join(tokens)
             results = prf_query(clean_query, index, k)
             for rank, (doc_id, score) in enumerate(results, start=1):
-                outf.write(f"{qid} Q0 {doc_id} {rank} {score:.4f} PRF\n")
+                outf.write(f"{qid} {doc_id} {rank} {score:.4f}\n")
 
 # -----------------------------
 # Main

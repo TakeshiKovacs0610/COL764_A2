@@ -4,8 +4,8 @@
 
 # bash phrase_search.sh temp/out_index Data/CORD19/queries.json temp/results --time
 
-# bash vsm.sh temp/out_index Data/CORD19/queries.json temp/results 100 --time
+# bash vsm.sh temp/out_index Data/CORD19/queries.json temp/results 200 --time
 
-# bash bm25_retrieval.sh temp/out_index Data/CORD19/queries.json temp/results 100 --time
+# bash bm25_retrieval.sh temp/out_index Data/CORD19/queries.json temp/results 200 --time
 
-# bash feedback.sh temp/out_index Data/CORD19/queries.json temp/results 100 --time
+# bash feedback.sh temp/out_index Data/CORD19/queries.json temp/results 200 --time
