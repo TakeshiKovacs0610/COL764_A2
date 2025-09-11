@@ -5,7 +5,7 @@ Phrase Search — Task 2
 Conforms to Assignment.md:
 - Two functions with specific signatures:
   * phrase_search_query(query: str, index: object) -> list
-  * phrase_search(queryFile: str, index_dir: str, stopword_file: str, outFile: str) -> None
+  * phrase_search(queryFile: str, index_dir: str, outFile: str) -> None
 - Multi-query output must be in TREC-style lines with four fields:
   qid docid rank score
 
@@ -105,7 +105,7 @@ def phrase_search_query(query: str, index: dict) -> list:
     return _phrase_search_candidates(index, toks)
 
 
-def phrase_search(queryFile: str, index_dir: str, stopword_file: str, outFile: str) -> None:
+def phrase_search(queryFile: str, index_dir: str, outFile: str) -> None:
     """Given a file containing queries, write results in TREC format to outFile.
 
     TREC format: one line per hit -> "qid docid rank score"
@@ -190,16 +190,15 @@ def _read_queries_json(path: str) -> Iterable[Tuple[str, str]]:
 def main(argv: List[str]) -> int:
     import argparse
     ap = argparse.ArgumentParser(prog="phrase_search.py")
-    # Shell compatibility: phrase_search.sh <INDEX_DIR> <QUERY_FILE_PATH> <OUTPUT_DIR> <PATH_OF_STOPWORDS_FILE>
+    # Shell compatibility: phrase_search.sh <INDEX_DIR> <QUERY_FILE_PATH> <OUTPUT_DIR>
     ap.add_argument("index_dir", help="Directory containing index.json from Task 1")
     ap.add_argument("query_file", help="Path to query JSON/JSONL file")
     ap.add_argument("output_dir", help="Directory where phrasesearchdocids.txt is written")
-    ap.add_argument("stopwords", help="Stopwords file path (ignored)")
     args = ap.parse_args(argv)
 
     os.makedirs(args.output_dir, exist_ok=True)
     out_path = os.path.join(args.output_dir, "phrase_search_docids.txt")
-    phrase_search(args.query_file, args.index_dir, args.stopwords, out_path)
+    phrase_search(args.query_file, args.index_dir, out_path)
     return 0
 
 

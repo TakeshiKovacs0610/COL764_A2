@@ -154,7 +154,7 @@ def _read_queries_json(path: str, fields: Optional[List[str]] = None):
     return out
 
 
-def vsm(queryFile: str, index_dir: str, stopword_file: str, k: int, outFile: str, fields: Optional[List[str]] = None) -> None:
+def vsm(queryFile: str, index_dir: str, k: int, outFile: str, fields: Optional[List[str]] = None) -> None:
     """
     Given a JSONL file containing queries, run VSM retrieval for each query
     and write top-k results to outFile in required format:
@@ -168,13 +168,6 @@ def vsm(queryFile: str, index_dir: str, stopword_file: str, k: int, outFile: str
     with open(os.path.join(index_dir, "vsm.json"), "r", encoding="utf-8") as f:
         vsm_index = json.load(f)
 
-    # load stopwords
-    stopwords = set()
-    if stopword_file and os.path.exists(stopword_file):
-        with open(stopword_file, "r", encoding="utf-8") as f:
-            for line in f:
-                stopwords.add(line.strip())
-
     # Ensure output directory exists
     os.makedirs(os.path.dirname(outFile), exist_ok=True)
 
@@ -183,9 +176,7 @@ def vsm(queryFile: str, index_dir: str, stopword_file: str, k: int, outFile: str
     
     with open(outFile, "w", encoding="utf-8") as out:
         for qid, text in queries:
-            # dont Filter stopwords
             tokens = [tok for tok in _tokenize_spacy_raw(nlp, text)]
-            # tokens = [tok for tok in _tokenize_spacy_raw(nlp, text) if tok not in stopwords]
             clean_query = " ".join(tokens)
 
             ranked = vsm_query(clean_query, vsm_index, k)
@@ -196,13 +187,13 @@ def vsm(queryFile: str, index_dir: str, stopword_file: str, k: int, outFile: str
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 6:
-        print(f"Usage: {sys.argv[0]} <INDEX_DIR> <QUERY_FILE.jsonl> <OUTPUT_DIR> <STOPWORDS.txt> <k>")
-        print("Example: python vsm.py index_dir queries.jsonl output_dir stopwords.txt 10")
+    if len(sys.argv) < 5:
+        print(f"Usage: {sys.argv[0]} <INDEX_DIR> <QUERY_FILE.jsonl> <OUTPUT_DIR> <k>")
+        print("Example: python vsm.py index_dir queries.jsonl output_dir 10")
         sys.exit(1)
 
-    index_dir, queryFile, out_dir, stopword_file, k = sys.argv[1:6]
+    index_dir, queryFile, out_dir, k = sys.argv[1:5]
     k = int(k)
     outFile = os.path.join(out_dir, "vsm_docids.txt")
-    vsm(queryFile, index_dir, stopword_file, k, outFile)
+    vsm(queryFile, index_dir, k, outFile)
     print(f"Results written to {outFile}")

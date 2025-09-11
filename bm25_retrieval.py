@@ -4,17 +4,16 @@ BM25 Retrieval — Task 4
 
 Implements two required functions:
   - bm25_query(query: str, index: object, k: int) -> list
-  - bm25(queryFile: str, index_dir: str, stopword_file: str, k: int, outFile: str) -> None
+  - bm25(queryFile: str, index_dir: str, k: int, outFile: str) -> None
 
 Index handling follows Task1's index.json format, plus bm25.json with doc-level stats:
   bm25.json = { "N": int, "avgdl": float, "doc_len": {docid: int}, "hyperparams": {...} }
 
 Tokenization uses spaCy's rule-based English tokenizer (spacy.blank("en")).
-Stopword file is accepted but not used (per instructions).
 Uses only the "title" field from queries.
 
 CLI usage mirrors other tasks via a shell wrapper:
-  python3 bm25_retrieval.py <INDEX_DIR> <QUERY_FILE_PATH> <OUTPUT_DIR> <PATH_OF_STOPWORDS_FILE> <k>
+  python3 bm25_retrieval.py <INDEX_DIR> <QUERY_FILE_PATH> <OUTPUT_DIR> <k>
 and writes TREC-style lines to <OUTPUT_DIR>/bm25_docids.txt
 """
 
@@ -30,6 +29,24 @@ except ImportError as e:
     raise SystemExit(
         "spaCy is required. Install with: pip install spacy"
     ) from e
+
+
+# BM25 hyperparameters by k
+HYPERPARAMS_BY_K = {
+    10: {"k1": 2.0, "b": 0.75},
+    50: {"k1": 1.5, "b": 0.75},
+    100: {"k1": 1.2, "b": 0.8},
+    500: {"k1": 1.0, "b": 0.85},
+    1000: {"k1": 0.8, "b": 0.9},
+}
+
+K3 = 0
+IDF_CLAMP_ZERO = True
+
+def get_hyperparams_for_k(k, hyperparams_by_k):
+    keys = sorted(hyperparams_by_k.keys())
+    closest = min(keys, key=lambda x: abs(x - k))
+    return hyperparams_by_k[closest]
 
 
 # ---------------- I/O helpers ----------------
@@ -160,9 +177,9 @@ def bm25_query(query: str, index: object, k: int) -> list:
     N = int(bm.get("N", 0))
     avgdl = float(bm.get("avgdl", 0.0))
     doc_len = bm.get("doc_len", {})
-    hp = bm.get("hyperparams", {})
-    k1 = float(hp.get("k1", 1.5))
-    b = float(hp.get("b", 0.75))
+    params = get_hyperparams_for_k(k, HYPERPARAMS_BY_K)
+    k1 = params["k1"]
+    b = params["b"]
 
     nlp = _init_tokenizer()
     q_tokens = _tokenize(nlp, query)
@@ -207,7 +224,7 @@ def bm25_query(query: str, index: object, k: int) -> list:
     return items[:k]
 
 
-def bm25(queryFile: str, index_dir: str, stopword_file: str, k: int, outFile: str, fields: Optional[List[str]] = None) -> None:
+def bm25(queryFile: str, index_dir: str, k: int, outFile: str, fields: Optional[List[str]] = None) -> None:
     """Run BM25 for all queries from queryFile and write TREC-style results to outFile.
 
     Each output line: "qid docid rank score"
@@ -233,13 +250,12 @@ def main(argv: List[str]) -> int:
     ap.add_argument("index_dir", help="Directory containing index.json and bm25.json")
     ap.add_argument("query_file", help="Path to query JSON/JSONL file")
     ap.add_argument("output_dir", help="Directory where bm25_docids.txt is written")
-    ap.add_argument("stopwords", help="Stopwords file path (accepted but ignored)")
     ap.add_argument("k", type=int, help="Top-k documents per query")
     args = ap.parse_args(argv)
 
     os.makedirs(args.output_dir, exist_ok=True)
     out_path = os.path.join(args.output_dir, "bm25_docids.txt")
-    bm25(args.query_file, args.index_dir, args.stopwords, args.k, out_path)
+    bm25(args.query_file, args.index_dir, args.k, out_path)
     return 0
 
 

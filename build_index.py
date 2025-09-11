@@ -223,7 +223,6 @@ def save_bm25_stats(inv: InvertedIndex, index_dir: str) -> None:
         "N": N,
         "avgdl": avgdl,
         "doc_len": inv.doc_len,
-        "hyperparams": {"k1": 1.5, "b": 0.75, "k3": 0, "idf_clamp_zero": True},
     }
     out_path = os.path.join(index_dir, "bm25.json")
     with open(out_path, "w", encoding="utf-8") as f:

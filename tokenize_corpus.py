@@ -8,7 +8,7 @@ Updated per Task 2 instructions:
 - No extra normalization (no forced lowercase, no digit stripping). Whatever
   spaCy emits as tokens becomes the vocabulary token.
 
-Usage: python3 tokenize_corpus.py <CORPUS_DIR_OR_FILE> <PATH_OF_STOPWORD_FILE> <VOCAB_DIR>
+Usage: python3 tokenize_corpus.py <CORPUS_DIR_OR_FILE> <VOCAB_DIR>
 """
 
 import os
@@ -121,7 +121,6 @@ def build_vocab(corpus_path: str, vocab_dir: str) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="tokenize_corpus.py")
     parser.add_argument("corpus", help="CORPUS_DIR_OR_FILE")
-    parser.add_argument("stopwords", help="PATH_OF_STOPWORD_FILE (ignored)")
     parser.add_argument("vocab_dir", help="VOCAB_DIR (output)")
     args = parser.parse_args()
 
